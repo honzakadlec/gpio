@@ -71,7 +71,7 @@ func setupEpoll() {
 		for {
 			numEvents, err := syscall.EpollWait(epollFD, epollEvents[:], -1)
 			if err != nil {
-				if err == syscall.EAGAIN {
+				if err == syscall.EAGAIN || err == syscall.EINTR {
 					continue
 				}
 				panic(fmt.Sprintf("EpollWait error: %v", err))
