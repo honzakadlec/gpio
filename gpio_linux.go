@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -107,7 +108,8 @@ type pin struct {
 // It also sets the mode for the pin, making it ready for use.
 func OpenPin(n int, mode Mode) (Pin, error) {
 	// export this pin to create the virtual files on the system
-	pinBase, err := expose(n)
+	resolved := resolvePin(n)
+	pinBase, err := expose(resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +118,7 @@ func OpenPin(n int, mode Mode) (Pin, error) {
 		return nil, err
 	}
 	p := &pin{
-		number:    n,
+		number:    resolved,
 		modePath:  filepath.Join(pinBase, "direction"),
 		edgePath:  filepath.Join(pinBase, "edge"),
 		valueFile: value,
@@ -127,6 +129,44 @@ func OpenPin(n int, mode Mode) (Pin, error) {
 		return nil, err
 	}
 	return p, nil
+}
+
+// gpioChipBase returns the sysfs number offset of the main GPIO controller.
+// On Raspberry Pi 5 (pinctrl-rp1) the legacy sysfs interface no longer starts
+// at 0 like it did on earlier Pis, so BCM pin numbers must be offset by the
+// chip's base before being exported.
+var cachedChipBase = -1
+
+func gpioChipBase() int {
+	if cachedChipBase >= 0 {
+		return cachedChipBase
+	}
+	cachedChipBase = 0
+	matches, err := filepath.Glob(filepath.Join(gpiobase, "gpiochip*"))
+	if err != nil {
+		return cachedChipBase
+	}
+	for _, chipPath := range matches {
+		label, err := readFile(filepath.Join(chipPath, "label"))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(label, "pinctrl-rp1") || strings.Contains(label, "pinctrl-bcm") || strings.Contains(label, "bcm2835-gpio") {
+			baseStr, err := readFile(filepath.Join(chipPath, "base"))
+			if err != nil {
+				continue
+			}
+			if base, err := strconv.Atoi(baseStr); err == nil {
+				cachedChipBase = base
+			}
+			break
+		}
+	}
+	return cachedChipBase
+}
+
+func resolvePin(n int) int {
+	return gpioChipBase() + n
 }
 
 // write opens a file for writing, writes the byte slice to it and closes the
