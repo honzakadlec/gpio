@@ -124,7 +124,12 @@ func OpenPin(n int, mode Mode) (Pin, error) {
 		valueFile: value,
 		initial:   true,
 	}
-	if err := p.setMode(mode); err != nil {
+	// Always write the direction here, even if it already reads back as wanted.
+	// On Raspberry Pi 5 (pinctrl-rp1) a pin starts with no function after boot,
+	// exporting doesn't change that and its direction still reads "in"; only a
+	// direction write muxes it to GPIO. Without it, setting an edge fails with
+	// "gpiochip_lock_as_irq: cannot get GPIO direction" and no IRQ is delivered.
+	if err := write([]byte(mode), p.modePath); err != nil {
 		p.Close()
 		return nil, err
 	}
